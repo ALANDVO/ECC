@@ -4,6 +4,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { isWithinRoot, realpathNearestExisting } = require('../path-safety');
+const { convertWindowsPathToWSL } = require('../install-targets/helpers');
 
 const CURRENT_PLUGIN_ID = 'ecc@ecc';
 // Legacy plugin ids, kept so existing installs are still recognized.
@@ -17,9 +18,12 @@ function resolveClaudePaths(options = {}) {
     || process.env.HOME
     || process.env.USERPROFILE
     || os.homedir();
-  const configDir = options.configDir
+  const rawConfigDir = options.configDir
     || process.env.CLAUDE_CONFIG_DIR
     || path.join(homeDir, '.claude');
+  // On WSL, convert Windows paths (e.g., C:\Users\name\.claude) to WSL paths
+  // (/mnt/c/Users/name/.claude) so the resolver finds the correct location.
+  const configDir = convertWindowsPathToWSL(rawConfigDir);
   const projectRoot = options.projectRoot || process.cwd();
 
   return {

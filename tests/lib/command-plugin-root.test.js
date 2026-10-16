@@ -186,6 +186,45 @@ for (const level of ['slug', 'org']) {
     } finally { fs.rmSync(temp, { recursive: true, force: true }); }
   });
 }
+// Regression: on WSL, CLAUDE_CONFIG_DIR may carry a Windows path (e.g.
+// C:\Users\name\.claude). Every inline resolver that reads CLAUDE_CONFIG_DIR
+// must include the /proc/version → /mnt/… conversion so hooks and commands
+// resolve to the correct mount instead of treating the Windows path as
+// relative. The source INLINE_RESOLVE, command .md files, and hooks.json /
+// codex-hooks.json must all carry the same conversion block.
+function countHooksWithWslConversion(filePath) {
+  const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const events = config.hooks || {};
+  let checked = 0;
+  for (const entries of Object.values(events)) {
+    if (!Array.isArray(entries)) continue;
+    for (const entry of entries) {
+      if (!entry.hooks) continue;
+      for (const hook of entry.hooks) {
+        if (typeof hook.command !== 'string') continue;
+        if (hook.command.includes('CLAUDE_CONFIG_DIR')) {
+          assert.ok(
+            hook.command.includes('proc/version') && hook.command.includes('microsoft'),
+            `${path.basename(filePath)} hook command with CLAUDE_CONFIG_DIR must include WSL path conversion`
+          );
+          checked++;
+        }
+      }
+    }
+  }
+  return checked;
+}
+
+test('hooks.json inline resolvers include WSL path conversion for CLAUDE_CONFIG_DIR', () => {
+  const checked = countHooksWithWslConversion(path.join(__dirname, '..', '..', 'hooks', 'hooks.json'));
+  assert.ok(checked > 0, 'Expected at least one hooks.json resolver with CLAUDE_CONFIG_DIR');
+});
+
+test('codex-hooks.json inline resolver includes WSL path conversion for CLAUDE_CONFIG_DIR', () => {
+  const checked = countHooksWithWslConversion(path.join(__dirname, '..', '..', 'hooks', 'codex-hooks.json'));
+  assert.strictEqual(checked, 1, 'Expected 1 codex-hooks.json resolver with CLAUDE_CONFIG_DIR');
+});
+
 console.log(`Passed: ${passed}`);
 console.log(`Failed: ${failed}`);
 

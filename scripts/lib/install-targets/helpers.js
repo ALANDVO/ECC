@@ -36,6 +36,10 @@ function setWSLForTesting(value) {
 // Windows path pattern: drive letter followed by :\ or :/
 const WINDOWS_PATH_PATTERN = /^[A-Za-z]:[\\/]/;
 
+// Compact WSL conversion snippet for inline resolvers embedded in commands and hooks.
+// Uses 8 backslashes in regex source so it preserves shell escaping when inlined into `node -e "..."`.
+const INLINE_WSL_CONVERSION = `try{if(o.platform()==='linux'){var v=f.readFileSync('/proc/version','utf8').toLowerCase();if(v.includes('microsoft')){var m=d.match(/^([A-Za-z]):[\\\\\\\\/]/);if(m){var dl=m[1].toLowerCase();d='/mnt/'+dl+d.slice(2).replace(/\\\\\\\\/g,'/')}}}}catch(_){}`;
+
 /**
  * Convert a Windows path to a WSL path.
  * Example: "C:\Users\name" -> "/mnt/c/Users/name"
@@ -487,4 +491,5 @@ module.exports = {
   resetWSLDetection,
   setWSLForTesting,
   convertWindowsPathToWSL,
+  INLINE_WSL_CONVERSION,
 };

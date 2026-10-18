@@ -193,7 +193,13 @@ for (const level of ['slug', 'org']) {
 // relative. The source INLINE_RESOLVE, command .md files, and hooks.json /
 // codex-hooks.json must all carry the same conversion block.
 function countHooksWithWslConversion(filePath) {
-  const config = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  const allowedFilePaths = new Set([
+    path.resolve(__dirname, '..', '..', 'hooks', 'hooks.json'),
+    path.resolve(__dirname, '..', '..', 'hooks', 'codex-hooks.json'),
+  ]);
+  const resolvedPath = path.resolve(filePath);
+  assert.ok(allowedFilePaths.has(resolvedPath), `Unexpected hook file path: ${filePath}`);
+  const config = JSON.parse(fs.readFileSync(resolvedPath, 'utf8'));
   const events = config.hooks || {};
   let checked = 0;
   for (const entries of Object.values(events)) {
@@ -222,10 +228,61 @@ test('hooks.json inline resolvers include WSL path conversion for CLAUDE_CONFIG_
 
 test('codex-hooks.json inline resolver includes WSL path conversion for CLAUDE_CONFIG_DIR', () => {
   const checked = countHooksWithWslConversion(path.join(__dirname, '..', '..', 'hooks', 'codex-hooks.json'));
-  assert.strictEqual(checked, 1, 'Expected 1 codex-hooks.json resolver with CLAUDE_CONFIG_DIR');
+  // Assert at least one resolver with WSL conversion exists. An exact count would break
+  // when a second hook with CLAUDE_CONFIG_DIR is added; checking the required behavior
+  // (all such hooks carry the conversion block) is enforced by countHooksWithWslConversion.
+  assert.ok(checked >= 1, 'Expected at least one codex-hooks.json resolver with CLAUDE_CONFIG_DIR WSL conversion');
+});
+
+test('inline resolver copies in commands and hooks match canonical buildInlineResolve', () => {
+  const { INLINE_RESOLVE, buildInlineResolve } = require('../../scripts/lib/resolve-ecc-root');
+  const { INLINE_WSL_CONVERSION } = require('../../scripts/lib/install-targets/helpers');
+  assert.ok(
+    INLINE_RESOLVE.includes(INLINE_WSL_CONVERSION),
+    'INLINE_RESOLVE must embed canonical INLINE_WSL_CONVERSION from helpers.js'
+  );
+
+  for (const cmdName of ['instinct-status', 'sessions', 'skill-health', 'skill-host-compat']) {
+    const cmdDoc = fs.readFileSync(path.join(__dirname, '..', '..', 'commands', `${cmdName}.md`), 'utf8');
+    const matches = cmdDoc.match(/\(function\(\)\{var p=require\(.+?return d\}\)\(\)/g) || [];
+    assert.ok(matches.length > 0, `Expected inline resolver in commands/${cmdName}.md`);
+    for (const match of matches) {
+      assert.strictEqual(match, INLINE_RESOLVE, `commands/${cmdName}.md inline resolver drifted from canonical INLINE_RESOLVE`);
+    }
+  }
+
+  const autoUpdateDoc = fs.readFileSync(path.join(__dirname, '..', '..', 'commands', 'auto-update.md'), 'utf8');
+  const autoUpdateMatches = autoUpdateDoc.match(/\(function\(\)\{var p=require\(.+?return d\}\)\(\)/g) || [];
+  assert.strictEqual(autoUpdateMatches.length, 1, 'Expected 1 inline resolver in commands/auto-update.md');
+  assert.strictEqual(
+    autoUpdateMatches[0],
+    buildInlineResolve({ probe: 'scripts/auto-update.js' }),
+    'commands/auto-update.md inline resolver drifted from canonical buildInlineResolve'
+  );
+
+  for (const hookFile of ['hooks.json', 'codex-hooks.json']) {
+    const config = JSON.parse(fs.readFileSync(path.join(__dirname, '..', '..', 'hooks', hookFile), 'utf8'));
+    let verified = 0;
+    for (const entries of Object.values(config.hooks || {})) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries) {
+        for (const hook of entry.hooks || []) {
+          if (typeof hook.command === 'string' && hook.command.includes('CLAUDE_CONFIG_DIR')) {
+            const m = hook.command.match(/const r=(\(function\(\)\{.*?\}\)\(\))/);
+            assert.ok(m, `Could not extract inline resolver from ${hookFile}`);
+            assert.strictEqual(m[1], INLINE_RESOLVE, `${hookFile} inline resolver drifted from canonical INLINE_RESOLVE`);
+            verified++;
+          }
+        }
+      }
+    }
+    assert.ok(verified > 0, `Expected at least one verified resolver in ${hookFile}`);
+  }
 });
 
 console.log(`Passed: ${passed}`);
 console.log(`Failed: ${failed}`);
 
 process.exit(failed > 0 ? 1 : 0);
+
+
